@@ -48,6 +48,8 @@ public class AzureMySqlSessionProvider : SessionFsProvider, ISessionFsSqliteProv
         IDictionary<string, object?>? bindParams,
         CancellationToken cancellationToken)
     {
+        Console.WriteLine($"[{_tenantId}] QueryAsync called: {queryType} - {query.Substring(0, Math.Min(80, query.Length))}...");
+
         await EnsureInitializedAsync(cancellationToken);
 
         // Translate SQLite query to MySQL and inject tenant_id filtering
@@ -62,6 +64,7 @@ public class AzureMySqlSessionProvider : SessionFsProvider, ISessionFsSqliteProv
             AddTenantIdParameter(cmd);
             BindParameters(cmd, bindParams);
             await cmd.ExecuteNonQueryAsync(cancellationToken);
+            Console.WriteLine($"[{_tenantId}] Exec completed");
             return null;
         }
 
@@ -85,6 +88,7 @@ public class AzureMySqlSessionProvider : SessionFsProvider, ISessionFsSqliteProv
                 rows.Add(row);
             }
 
+            Console.WriteLine($"[{_tenantId}] Query completed, {rows.Count} rows returned");
             return new SessionFsSqliteResult
             {
                 Columns = columns,
@@ -104,6 +108,7 @@ public class AzureMySqlSessionProvider : SessionFsProvider, ISessionFsSqliteProv
             await using var lastIdCmd = new MySqlCommand("SELECT LAST_INSERT_ID()", conn);
             var lastInsertId = await lastIdCmd.ExecuteScalarAsync(cancellationToken);
 
+            Console.WriteLine($"[{_tenantId}] Run completed, {rowsAffected} rows affected");
             return new SessionFsSqliteResult
             {
                 Columns = [],

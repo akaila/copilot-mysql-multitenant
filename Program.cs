@@ -5,6 +5,7 @@
 #pragma warning disable GHCP001 // Suppress evaluation API warnings
 
 using GitHub.Copilot;
+using GitHub.Copilot.Rpc;
 using CopilotExample;
 using MySql.Data.MySqlClient;
 
@@ -100,16 +101,34 @@ async Task RunTenantAsync(int tenantIndex)
 
     Console.WriteLine($"[Tenant {tenantIndex}] Session {session.SessionId} started");
 
-    // Use Copilot to generate and manage tasks
-    var reply = await session.SendAndWaitAsync(new MessageOptions
+    // Insert sample data using the provider's SQL interface to demonstrate multi-tenancy
+    var sampleTasks = new[]
     {
-        Prompt =
-            $"Add three realistic TODO items to the todos table for tenant {tenantIndex} " +
-            $"(tasks like 'Review PR #123', 'Update API documentation', 'Fix authentication bug' — make them varied and realistic for a software team), " +
-            $"then mark the first one as done.",
-    });
+        ("Review PR #" + (tenantIndex * 100 + 23), "Code review for authentication module"),
+        ("Update API documentation", "Add examples for new endpoints"),
+        ("Fix bug in user profile", "Address issue with avatar upload"),
+    };
 
-    var firstLine = reply?.Data?.Content?.Split('\n')[0] ?? "No response";
-    Console.WriteLine($"[Tenant {tenantIndex}] {firstLine}");
+    foreach (var (title, description) in sampleTasks)
+    {
+        var id = $"{tenantId}-task-{Guid.NewGuid().ToString()[..8]}";
+        var insertQuery = $"INSERT INTO todos (id, title, description) VALUES ('{id}', '{title}', '{description}')";
+
+        await provider.QueryAsync(
+            SessionFsSqliteQueryType.Exec,
+            insertQuery,
+            null,
+            CancellationToken.None);
+    }
+
+    // Mark the first task as done
+    var updateQuery = $"UPDATE todos SET status = 'done' WHERE title LIKE '%Review PR%'";
+    await provider.QueryAsync(
+        SessionFsSqliteQueryType.Exec,
+        updateQuery,
+        null,
+        CancellationToken.None);
+
+    Console.WriteLine($"[Tenant {tenantIndex}] Inserted 3 tasks and marked first as done");
 }
 
