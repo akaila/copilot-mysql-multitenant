@@ -48,6 +48,14 @@ public class AzureMySqlSessionProvider : SessionFsProvider, ISessionFsSqliteProv
         IDictionary<string, object?>? bindParams,
         CancellationToken cancellationToken)
     {
+        // Monitor for CREATE TABLE statements from CLI
+        if (query.Contains("CREATE TABLE", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"[{_tenantId}] ??  CREATE TABLE received via QueryAsync!");
+            Console.WriteLine($"[{_tenantId}] Type: {queryType}");
+            Console.WriteLine($"[{_tenantId}] Query: {query.Substring(0, Math.Min(200, query.Length))}...");
+        }
+
         Console.WriteLine($"[{_tenantId}] QueryAsync called: {queryType} - {query.Substring(0, Math.Min(80, query.Length))}...");
 
         await EnsureInitializedAsync(cancellationToken);
@@ -130,33 +138,46 @@ public class AzureMySqlSessionProvider : SessionFsProvider, ISessionFsSqliteProv
         await using var conn = new MySqlConnection(_connectionString);
         await conn.OpenAsync(cancellationToken);
 
-        // Create tables if they don't exist (with tenant_id column)
+        // Schema based on CLI team specification with tenant_id added for multi-tenancy
+        // Reference: SCHEMA_VERIFICATION.md
         var schema = @"
             CREATE TABLE IF NOT EXISTS todos (
-                id VARCHAR(255) PRIMARY KEY,
+                id VARCHAR(255) NOT NULL,
                 tenant_id VARCHAR(100) NOT NULL,
                 title TEXT NOT NULL,
                 description TEXT,
-                status VARCHAR(50) DEFAULT 'pending',
+                status VARCHAR(50) DEFAULT 'pending'
+                    CHECK(status IN ('pending','in_progress','done','blocked')),
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                INDEX idx_tenant (tenant_id)
+                PRIMARY KEY (tenant_id, id),
+                INDEX idx_tenant (tenant_id),
+                INDEX idx_status (tenant_id, status)
             );
 
             CREATE TABLE IF NOT EXISTS inbox_entries (
-                id VARCHAR(255) PRIMARY KEY,
+                id VARCHAR(255) NOT NULL,
                 tenant_id VARCHAR(100) NOT NULL,
                 title TEXT NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                INDEX idx_tenant (tenant_id)
+                PRIMARY KEY (tenant_id, id),
+                INDEX idx_tenant (tenant_id),
+                INDEX idx_created (tenant_id, created_at DESC)
             );
 
             CREATE TABLE IF NOT EXISTS todo_deps (
-                id INT AUTO_INCREMENT PRIMARY KEY,
                 tenant_id VARCHAR(100) NOT NULL,
-                todo_id VARCHAR(255),
-                depends_on VARCHAR(255),
-                INDEX idx_tenant (tenant_id)
+                todo_id VARCHAR(255) NOT NULL,
+                depends_on VARCHAR(255) NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, todo_id, depends_on),
+                INDEX idx_tenant (tenant_id),
+                FOREIGN KEY (tenant_id, todo_id) 
+                    REFERENCES todos(tenant_id, id) 
+                    ON DELETE CASCADE,
+                FOREIGN KEY (tenant_id, depends_on) 
+                    REFERENCES todos(tenant_id, id) 
+                    ON DELETE CASCADE
             );";
 
         await using var cmd = new MySqlCommand(schema, conn);
